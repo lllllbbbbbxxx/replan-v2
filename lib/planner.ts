@@ -10,7 +10,6 @@ export type ScheduledStep = {
   detail: string;
   estimatedMinutes: number;
   scheduledDate: string;
-  completed: boolean;
 };
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -84,7 +83,6 @@ export function scheduleSteps(
       detail: step.detail,
       estimatedMinutes: step.estimatedMinutes,
       scheduledDate: dates[dayIndex],
-      completed: false,
     };
   });
 }

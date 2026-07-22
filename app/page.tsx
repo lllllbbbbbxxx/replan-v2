@@ -1,7 +1,16 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { markStepComplete } from "../lib/plan-state";
+import {
+  createFeedbackDraft,
+  feedbackLabel,
+  FeedbackDraft,
+  FeedbackStatus,
+  isValidFeedback,
+  PartialPercent,
+  submitTaskFeedback,
+  TaskFeedback,
+} from "../lib/plan-state";
 
 type PlanStep = {
   id: string;
@@ -9,7 +18,7 @@ type PlanStep = {
   detail: string;
   estimatedMinutes: number;
   scheduledDate: string;
-  completed: boolean;
+  feedback?: TaskFeedback;
 };
 
 type Plan = {
@@ -32,6 +41,15 @@ type DayGroup = {
 };
 
 const STORAGE_KEY = "replan:mvp-plan";
+const FEEDBACK_OPTIONS: Array<{
+  status: FeedbackStatus;
+  label: string;
+}> = [
+  { status: "completed", label: "完成" },
+  { status: "partial", label: "部分完成" },
+  { status: "not_completed", label: "未完成" },
+];
+const PARTIAL_OPTIONS: PartialPercent[] = [25, 50, 75];
 const pad = (value: number) => String(value).padStart(2, "0");
 
 function toLocalDateString(date: Date) {
@@ -73,6 +91,45 @@ function buildDayGroups(plan: Plan): DayGroup[] {
     .map(([date, steps]) => ({ date, steps }));
 }
 
+function normalizeSavedPlan(value: string): Plan {
+  type LegacyStep = Omit<PlanStep, "feedback"> & {
+    completed?: boolean;
+    feedback?: TaskFeedback;
+  };
+  type LegacyPlan = Omit<Plan, "steps"> & { steps: LegacyStep[] };
+
+  const parsed = JSON.parse(value) as LegacyPlan;
+  if (!parsed || !Array.isArray(parsed.steps)) {
+    throw new Error("Invalid saved plan");
+  }
+
+  return {
+    ...parsed,
+    steps: parsed.steps.map(({ completed, feedback, ...step }) => {
+      if (isValidFeedback(feedback)) return { ...step, feedback };
+      if (completed) {
+        return {
+          ...step,
+          feedback: { status: "completed", percent: 100 },
+        } satisfies PlanStep;
+      }
+      return step;
+    }),
+  };
+}
+
+function feedbackClass(feedback?: TaskFeedback) {
+  if (!feedback) return "";
+  return `is-${feedback.status.replace("_", "-")}`;
+}
+
+function feedbackSymbol(feedback?: TaskFeedback) {
+  if (!feedback) return "";
+  if (feedback.status === "completed") return "✓";
+  if (feedback.status === "not_completed") return "—";
+  return `${feedback.percent}%`;
+}
+
 export default function Home() {
   const today = useMemo(() => toLocalDateString(new Date()), []);
   const defaultDeadline = useMemo(
@@ -83,6 +140,9 @@ export default function Home() {
   const [description, setDescription] = useState("");
   const [deadline, setDeadline] = useState(defaultDeadline);
   const [plan, setPlan] = useState<Plan | null>(null);
+  const [feedbackDrafts, setFeedbackDrafts] = useState<
+    Record<string, FeedbackDraft>
+  >({});
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
   const [hasLoadedStorage, setHasLoadedStorage] = useState(false);
@@ -91,7 +151,7 @@ export default function Home() {
     const loadSavedPlan = window.setTimeout(() => {
       try {
         const saved = window.localStorage.getItem(STORAGE_KEY);
-        if (saved) setPlan(JSON.parse(saved) as Plan);
+        if (saved) setPlan(normalizeSavedPlan(saved));
       } catch {
         window.localStorage.removeItem(STORAGE_KEY);
       } finally {
@@ -111,9 +171,18 @@ export default function Home() {
     }
   }, [plan, hasLoadedStorage]);
 
-  const completedCount = plan?.steps.filter((step) => step.completed).length ?? 0;
+  const completedCount =
+    plan?.steps.filter((step) => step.feedback?.status === "completed").length ??
+    0;
+  const feedbackCount =
+    plan?.steps.filter((step) => step.feedback !== undefined).length ?? 0;
   const progress = plan?.steps.length
-    ? Math.round((completedCount / plan.steps.length) * 100)
+    ? Math.round(
+        plan.steps.reduce(
+          (sum, step) => sum + (step.feedback?.percent ?? 0),
+          0,
+        ) / plan.steps.length,
+      )
     : 0;
   const dayGroups = plan ? buildDayGroups(plan) : [];
 
@@ -153,6 +222,7 @@ export default function Home() {
       }
 
       setPlan(result.plan);
+      setFeedbackDrafts({});
     } catch (requestError) {
       setError(
         requestError instanceof Error
@@ -164,19 +234,51 @@ export default function Home() {
     }
   }
 
-  function completeStep(stepId: string) {
+  function chooseFeedbackStatus(
+    stepId: string,
+    status: FeedbackStatus,
+    savedFeedback?: TaskFeedback,
+  ) {
+    const savedPartial =
+      status === "partial" && savedFeedback?.status === "partial"
+        ? savedFeedback.percent
+        : null;
+    setFeedbackDrafts((current) => ({
+      ...current,
+      [stepId]: createFeedbackDraft(status, savedPartial),
+    }));
+  }
+
+  function choosePartialPercent(stepId: string, percent: PartialPercent) {
+    setFeedbackDrafts((current) => ({
+      ...current,
+      [stepId]: createFeedbackDraft("partial", percent),
+    }));
+  }
+
+  function submitFeedback(stepId: string) {
+    const draft = feedbackDrafts[stepId];
+    if (!isValidFeedback(draft)) return;
+
     setPlan((current) => {
       if (!current) return current;
-      const nextSteps = markStepComplete(current.steps, stepId);
+      const nextSteps = submitTaskFeedback(current.steps, stepId, draft);
       return nextSteps === current.steps
         ? current
         : { ...current, steps: nextSteps };
+    });
+
+    setFeedbackDrafts((current) => {
+      const next = { ...current };
+      delete next[stepId];
+      return next;
     });
   }
 
   function resetPlan() {
     if (!window.confirm("清空当前计划并重新开始？")) return;
     setPlan(null);
+    setFeedbackDrafts({});
     setTitle("");
     setDescription("");
     setDeadline(defaultDeadline);
@@ -323,7 +425,7 @@ export default function Home() {
                   <span style={{ width: `${progress}%` }} />
                 </div>
                 <p>
-                  已完成 {completedCount} / {plan.steps.length}
+                  已反馈 {feedbackCount} / {plan.steps.length} · 完成 {completedCount} 项
                 </p>
               </div>
 
@@ -340,31 +442,120 @@ export default function Home() {
                         {group.date === today ? <span>今天</span> : null}
                       </div>
                       <div className="step-list">
-                        {group.steps.map((step) => (
-                          <button
-                            type="button"
-                            className={`step-card ${step.completed ? "is-complete" : ""}`}
-                            key={step.id}
-                            onClick={() => completeStep(step.id)}
-                            disabled={step.completed}
-                            aria-label={
-                              step.completed
-                                ? `${step.title}，已完成`
-                                : `将“${step.title}”标记为完成`
-                            }
-                          >
-                            <span className="custom-check" aria-hidden="true">
-                              ✓
-                            </span>
-                            <span className="step-copy">
-                              <strong>{step.title}</strong>
-                              <span>{step.detail}</span>
-                            </span>
-                            <span className="duration">
-                              {minutesLabel(step.estimatedMinutes)}
-                            </span>
-                          </button>
-                        ))}
+                        {group.steps.map((step) => {
+                          const draft = feedbackDrafts[step.id];
+                          const selectedStatus = draft?.status ?? step.feedback?.status;
+                          const isToday = group.date === today;
+
+                          return (
+                            <article
+                              className={`step-card ${feedbackClass(step.feedback)}`}
+                              key={step.id}
+                            >
+                              <div className="step-main">
+                                <span
+                                  className="feedback-indicator"
+                                  aria-hidden="true"
+                                >
+                                  {feedbackSymbol(step.feedback)}
+                                </span>
+                                <span className="step-copy">
+                                  <strong>{step.title}</strong>
+                                  <span>{step.detail}</span>
+                                </span>
+                                <span className="duration">
+                                  {minutesLabel(step.estimatedMinutes)}
+                                </span>
+                              </div>
+
+                              {isToday ? (
+                                <div className="feedback-panel">
+                                  <div className="feedback-meta">
+                                    <strong>今日反馈</strong>
+                                    <span className="feedback-meta-badges">
+                                      {step.feedback ? (
+                                        <span className="saved-feedback">
+                                          已保存：{feedbackLabel(step.feedback)}
+                                        </span>
+                                      ) : (
+                                        <span className="saved-feedback is-empty">
+                                          尚未反馈
+                                        </span>
+                                      )}
+                                      {draft ? (
+                                        <span className="draft-feedback">待提交</span>
+                                      ) : null}
+                                    </span>
+                                  </div>
+
+                                  <div
+                                    className="feedback-status-options"
+                                    role="group"
+                                    aria-label={`${step.title}的完成状态`}
+                                  >
+                                    {FEEDBACK_OPTIONS.map((option) => (
+                                      <button
+                                        className={`feedback-option status-${option.status.replace("_", "-")} ${selectedStatus === option.status ? "is-selected" : ""}`}
+                                        type="button"
+                                        key={option.status}
+                                        aria-pressed={selectedStatus === option.status}
+                                        onClick={() =>
+                                          chooseFeedbackStatus(
+                                            step.id,
+                                            option.status,
+                                            step.feedback,
+                                          )
+                                        }
+                                      >
+                                        {option.label}
+                                      </button>
+                                    ))}
+                                  </div>
+
+                                  {draft?.status === "partial" ? (
+                                    <div
+                                      className="partial-options"
+                                      role="group"
+                                      aria-label="选择部分完成比例"
+                                    >
+                                      {PARTIAL_OPTIONS.map((percent) => (
+                                        <button
+                                          className={`partial-option ${draft.percent === percent ? "is-selected" : ""}`}
+                                          type="button"
+                                          key={percent}
+                                          aria-pressed={draft.percent === percent}
+                                          onClick={() =>
+                                            choosePartialPercent(step.id, percent)
+                                          }
+                                        >
+                                          完成 {percent}%
+                                        </button>
+                                      ))}
+                                    </div>
+                                  ) : null}
+
+                                  {draft ? (
+                                    <div className="feedback-submit-row">
+                                      <span>提交前不会修改原计划</span>
+                                      <button
+                                        className="submit-feedback-button"
+                                        type="button"
+                                        disabled={!isValidFeedback(draft)}
+                                        onClick={() => submitFeedback(step.id)}
+                                      >
+                                        提交反馈
+                                      </button>
+                                    </div>
+                                  ) : null}
+                                </div>
+                              ) : step.feedback ? (
+                                <p className="historical-feedback">
+                                  {feedbackLabel(step.feedback)}
+                                </p>
+                              ) : null}
+                            </article>
+                          );
+                        })}
                       </div>
                     </div>
                   </article>

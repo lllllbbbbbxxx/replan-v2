@@ -632,69 +632,271 @@ input:disabled {
 .step-card {
   width: 100%;
   position: relative;
-  min-height: 76px;
+  overflow: hidden;
   display: grid;
-  grid-template-columns: 24px minmax(0, 1fr) auto;
-  gap: 12px;
-  align-items: center;
-  padding: 14px 15px;
   border: 1px solid #e0e0d8;
   border-radius: 13px;
   background: rgba(255, 255, 255, 0.7);
   color: inherit;
-  cursor: pointer;
-  font: inherit;
-  text-align: left;
   transition:
     transform 160ms ease,
     border-color 160ms ease,
     background 160ms ease;
 }
 
-.step-card:hover:not(:disabled) {
+.step-card:hover {
   transform: translateY(-1px);
   border-color: #b8c9bf;
   background: white;
 }
 
-.step-card:active:not(:disabled) {
-  transform: translateY(0) scale(0.995);
+.step-main {
+  min-height: 76px;
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 14px 15px;
 }
 
-.step-card:focus-visible {
-  outline: 3px solid rgba(22, 108, 77, 0.2);
-  outline-offset: 2px;
-}
-
-.step-card:disabled {
-  cursor: default;
-  opacity: 1;
-}
-
-.custom-check {
-  width: 22px;
-  height: 22px;
+.feedback-indicator {
+  width: 30px;
+  height: 30px;
   display: grid;
   place-items: center;
   border: 1.5px solid #b5c1ba;
-  border-radius: 7px;
-  color: transparent;
-  font-size: 13px;
-  transition:
-    background 160ms ease,
-    border-color 160ms ease,
-    color 160ms ease;
+  border-radius: 50%;
+  color: #8d9791;
+  font-size: 9px;
+  font-weight: 800;
 }
 
-.step-card.is-complete {
+.feedback-indicator:empty::before {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #b5c1ba;
+  content: "";
+}
+
+.step-card.is-completed {
+  border-color: #c9ddd1;
   background: #f1f5ef;
 }
 
-.step-card.is-complete .custom-check {
+.step-card.is-completed .feedback-indicator {
   border-color: var(--green);
   background: var(--green);
   color: white;
-  transform: scale(1.04);
+}
+
+.step-card.is-partial {
+  border-color: #e6d6bb;
+  background: #fbf7ef;
+}
+
+.step-card.is-partial .feedback-indicator {
+  border-color: #b87527;
+  background: #fff7e9;
+  color: #9b5b11;
+}
+
+.step-card.is-not-completed {
+  border-color: #dfd3d0;
+  background: #f8f5f3;
+}
+
+.step-card.is-not-completed .feedback-indicator {
+  border-color: #9a7169;
+  background: #f4ebe8;
+  color: #77534c;
+}
+
+.feedback-panel {
+  display: grid;
+  gap: 10px;
+  padding: 12px 15px 14px 59px;
+  border-top: 1px solid rgba(33, 57, 46, 0.09);
+  background: rgba(250, 250, 247, 0.65);
+}
+
+.feedback-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.feedback-meta > strong {
+  color: #526159;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.feedback-meta-badges {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 5px;
+}
+
+.saved-feedback,
+.draft-feedback {
+  padding: 3px 7px;
+  border-radius: 999px;
+  font-size: 9px;
+  font-weight: 750;
+}
+
+.saved-feedback {
+  background: #e9f1ec;
+  color: var(--green);
+}
+
+.saved-feedback.is-empty {
+  background: #efefea;
+  color: #7f8681;
+}
+
+.draft-feedback {
+  background: #fff0df;
+  color: #a95c17;
+}
+
+.feedback-status-options,
+.partial-options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.feedback-option,
+.partial-option,
+.submit-feedback-button {
+  border: 1px solid #d8ddd9;
+  border-radius: 9px;
+  background: white;
+  color: #5c6761;
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 760;
+  transition:
+    transform 130ms ease-out,
+    border-color 130ms ease-out,
+    background 130ms ease-out,
+    color 130ms ease-out;
+}
+
+.feedback-option {
+  min-height: 34px;
+  padding: 7px 9px;
+}
+
+.feedback-option:hover,
+.partial-option:hover {
+  border-color: #9db4a7;
+  transform: translateY(-1px);
+}
+
+.feedback-option:active,
+.partial-option:active,
+.submit-feedback-button:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.feedback-option:focus-visible,
+.partial-option:focus-visible,
+.submit-feedback-button:focus-visible {
+  outline: 3px solid rgba(22, 108, 77, 0.18);
+  outline-offset: 2px;
+}
+
+.feedback-option.status-completed.is-selected {
+  border-color: var(--green);
+  background: #e9f2ed;
+  color: var(--green);
+}
+
+.feedback-option.status-partial.is-selected {
+  border-color: #c6812f;
+  background: #fff5e5;
+  color: #9b5b11;
+}
+
+.feedback-option.status-not-completed.is-selected {
+  border-color: #9a7169;
+  background: #f5eae7;
+  color: #77534c;
+}
+
+.partial-options {
+  animation: feedback-reveal 150ms ease-out;
+}
+
+.partial-option {
+  min-height: 30px;
+  padding: 6px 8px;
+  background: #fffcf6;
+  color: #805820;
+}
+
+.partial-option.is-selected {
+  border-color: #c6812f;
+  background: #f4d7ac;
+  color: #623c0d;
+}
+
+.feedback-submit-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 1px;
+  animation: feedback-reveal 150ms ease-out;
+}
+
+.feedback-submit-row > span {
+  color: #929993;
+  font-size: 9px;
+}
+
+.submit-feedback-button {
+  min-width: 82px;
+  padding: 7px 12px;
+  border-color: var(--green);
+  background: var(--green);
+  color: white;
+}
+
+.submit-feedback-button:hover:not(:disabled) {
+  background: #105b40;
+}
+
+.submit-feedback-button:disabled {
+  border-color: #d7dad7;
+  background: #d7dad7;
+  color: #929792;
+  cursor: not-allowed;
+}
+
+.historical-feedback {
+  margin: -5px 15px 13px 59px;
+  color: #738078;
+  font-size: 9px;
+  font-weight: 750;
+}
+
+@keyframes feedback-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .step-copy {
@@ -716,8 +918,8 @@ input:disabled {
   line-height: 1.45;
 }
 
-.is-complete .step-copy strong,
-.is-complete .step-copy > span {
+.is-completed .step-copy strong,
+.is-completed .step-copy > span {
   color: #89908b;
   text-decoration: line-through;
 }
@@ -856,12 +1058,30 @@ footer {
     font-size: 28px;
   }
 
-  .step-card {
-    grid-template-columns: 24px minmax(0, 1fr);
+  .step-main {
+    grid-template-columns: 30px minmax(0, 1fr);
   }
 
   .duration {
     display: none;
+  }
+
+  .feedback-panel {
+    padding-left: 15px;
+  }
+
+  .feedback-meta,
+  .feedback-submit-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .feedback-meta-badges {
+    justify-content: flex-start;
+  }
+
+  .submit-feedback-button {
+    width: 100%;
   }
 
   .trust-line {
