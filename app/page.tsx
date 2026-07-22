@@ -11,6 +11,11 @@ import {
   submitTaskFeedback,
   TaskFeedback,
 } from "../lib/plan-state";
+import {
+  calculateRemainingMinutes,
+  calculateTotalOriginalMinutes,
+  calculateTotalRemainingMinutes,
+} from "../lib/remaining-duration";
 
 type PlanStep = {
   id: string;
@@ -76,6 +81,10 @@ function minutesLabel(minutes: number) {
   const hours = Math.floor(minutes / 60);
   const rest = minutes % 60;
   return rest ? `${hours} 小时 ${rest} 分钟` : `${hours} 小时`;
+}
+
+function remainingMinutesLabel(minutes: number) {
+  return minutes === 0 ? "0 小时" : minutesLabel(minutes);
 }
 
 function buildDayGroups(plan: Plan): DayGroup[] {
@@ -183,6 +192,12 @@ export default function Home() {
           0,
         ) / plan.steps.length,
       )
+    : 0;
+  const totalOriginalMinutes = plan
+    ? calculateTotalOriginalMinutes(plan.steps)
+    : 0;
+  const totalRemainingMinutes = plan
+    ? calculateTotalRemainingMinutes(plan.steps)
     : 0;
   const dayGroups = plan ? buildDayGroups(plan) : [];
 
@@ -427,6 +442,21 @@ export default function Home() {
                 <p>
                   已反馈 {feedbackCount} / {plan.steps.length} · 完成 {completedCount} 项
                 </p>
+                <div
+                  className="remaining-summary"
+                  aria-label={`剩余总时长 ${remainingMinutesLabel(totalRemainingMinutes)}，原计划 ${minutesLabel(totalOriginalMinutes)}`}
+                >
+                  <div>
+                    <span>剩余总时长</span>
+                    <strong>
+                      {remainingMinutesLabel(totalRemainingMinutes)}
+                    </strong>
+                  </div>
+                  <p>
+                    原计划 {minutesLabel(totalOriginalMinutes)}
+                    <span>每项向上取整至 30 分钟</span>
+                  </p>
+                </div>
               </div>
 
               <div className="timeline">
@@ -446,6 +476,10 @@ export default function Home() {
                           const draft = feedbackDrafts[step.id];
                           const selectedStatus = draft?.status ?? step.feedback?.status;
                           const isToday = group.date === today;
+                          const remainingMinutes = calculateRemainingMinutes(
+                            step.estimatedMinutes,
+                            step.feedback,
+                          );
 
                           return (
                             <article
@@ -463,8 +497,17 @@ export default function Home() {
                                   <strong>{step.title}</strong>
                                   <span>{step.detail}</span>
                                 </span>
-                                <span className="duration">
-                                  {minutesLabel(step.estimatedMinutes)}
+                                <span
+                                  className={`duration ${remainingMinutes === 0 ? "is-zero" : ""}`}
+                                  aria-label={`剩余 ${remainingMinutesLabel(remainingMinutes)}，原定 ${minutesLabel(step.estimatedMinutes)}`}
+                                >
+                                  <span>剩余</span>
+                                  <strong>
+                                    {remainingMinutesLabel(remainingMinutes)}
+                                  </strong>
+                                  <small>
+                                    原 {minutesLabel(step.estimatedMinutes)}
+                                  </small>
                                 </span>
                               </div>
 

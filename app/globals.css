@@ -563,6 +563,52 @@ input:disabled {
   font-size: 11px;
 }
 
+.remaining-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin-top: 15px;
+  padding: 13px 14px;
+  border: 1px solid #d9e2dc;
+  border-radius: 11px;
+  background: #f4f7f4;
+}
+
+.remaining-summary > div {
+  display: grid;
+  gap: 2px;
+}
+
+.remaining-summary > div > span {
+  color: #6e7b74;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+}
+
+.remaining-summary strong {
+  color: var(--green);
+  font-size: 18px;
+  line-height: 1.2;
+}
+
+.remaining-summary > p {
+  margin: 0;
+  color: #69736d;
+  font-size: 10px;
+  font-weight: 700;
+  text-align: right;
+}
+
+.remaining-summary > p span {
+  display: block;
+  margin-top: 2px;
+  color: #929993;
+  font-size: 8px;
+  font-weight: 600;
+}
+
 .day-group {
   display: grid;
   grid-template-columns: 30px 1fr;
@@ -925,15 +971,43 @@ input:disabled {
 }
 
 .duration {
-  align-self: flex-start;
-  margin-top: 3px;
-  padding: 4px 7px;
+  min-width: 84px;
+  align-self: center;
+  display: grid;
+  gap: 1px;
+  padding: 6px 8px;
   border-radius: 7px;
   background: #f0efe9;
   color: #747c77;
-  font-size: 9px;
-  font-weight: 700;
+  text-align: right;
   white-space: nowrap;
+}
+
+.duration > span {
+  color: #8a918c;
+  font-size: 8px;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+}
+
+.duration > strong {
+  color: #3f5148;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.duration > small {
+  color: #969b97;
+  font-size: 8px;
+  font-weight: 600;
+}
+
+.duration.is-zero {
+  background: #e5efe8;
+}
+
+.duration.is-zero > strong {
+  color: var(--green);
 }
 
 .completion-card {
@@ -1063,7 +1137,26 @@ footer {
   }
 
   .duration {
-    display: none;
+    grid-column: 2;
+    grid-template-columns: auto auto;
+    column-gap: 6px;
+    justify-self: start;
+    min-width: 0;
+    text-align: left;
+  }
+
+  .duration > small {
+    grid-column: 1 / -1;
+  }
+
+  .remaining-summary {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 7px;
+  }
+
+  .remaining-summary > p {
+    text-align: left;
   }
 
   .feedback-panel {
