@@ -32,6 +32,7 @@ test("schedules in order inside the next seven days", () => {
     [...steps].sort((a, b) => a.scheduledDate.localeCompare(b.scheduledDate)),
     steps,
   );
+  assert.ok(steps.every((step) => step.feedback === undefined));
 });
 
 test("respects an earlier deadline", () => {
