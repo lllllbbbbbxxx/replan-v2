@@ -1,4 +1,8 @@
-# Replan MVP
+# Replan V2
+
+> **项目状态：V2 in progress / MVP Prototype。** 当前仅用于本地原型验证，完成状态只保存在当前浏览器；尚未形成稳定端到端版本或公开服务。
+>
+> V1 原型与失败复盘见 [ai-schedule-butler](https://github.com/lllllbbbbbxxx/ai-schedule-butler)。V2 当前重点是统一跨模块状态契约、建立场景评测与验收基线，并先收束最小稳定闭环。
 
 输入一个带截止日期的大任务，Replan 会用 DeepSeek 将任务拆成可执行步骤，并由本地排期算法安排到未来七天。完成状态仅保存在当前浏览器。
 
