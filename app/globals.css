@@ -524,6 +524,72 @@ input:disabled {
   color: #aa4729;
 }
 
+.undo-banner {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  margin-top: 20px;
+  padding: 13px 14px;
+  border: 1px solid #bdd6c7;
+  border-radius: 12px;
+  background: #edf5f0;
+  color: var(--green);
+  animation: feedback-reveal 160ms ease-out;
+}
+
+.undo-banner-mark {
+  width: 27px;
+  height: 27px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--green);
+  color: white;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.undo-banner strong {
+  font-size: 11px;
+}
+
+.undo-banner p {
+  margin: 2px 0 0;
+  color: #6d7d74;
+  font-size: 9px;
+}
+
+.undo-banner button {
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--green);
+  border-radius: 9px;
+  background: transparent;
+  color: var(--green);
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 800;
+  transition:
+    background 140ms ease,
+    color 140ms ease,
+    transform 140ms ease;
+}
+
+.undo-banner button:hover {
+  background: var(--green);
+  color: white;
+}
+
+.undo-banner button:active {
+  transform: scale(0.97);
+}
+
+.undo-banner button:focus-visible {
+  outline: 3px solid rgba(22, 108, 77, 0.18);
+  outline-offset: 2px;
+}
+
 .preview-backdrop {
   position: fixed;
   z-index: 20;
@@ -1440,6 +1506,15 @@ footer {
   .preview-actions > div {
     display: grid;
     grid-template-columns: 1fr 1.25fr;
+  }
+
+  .undo-banner {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .undo-banner button {
+    grid-column: 1 / -1;
+    width: 100%;
   }
 
   .submit-feedback-button {
