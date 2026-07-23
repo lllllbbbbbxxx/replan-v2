@@ -8,7 +8,6 @@ import {
   FeedbackStatus,
   isValidFeedback,
   PartialPercent,
-  submitTaskFeedback,
   TaskFeedback,
 } from "../lib/plan-state";
 import {
@@ -16,15 +15,15 @@ import {
   calculateTotalOriginalMinutes,
   calculateTotalRemainingMinutes,
 } from "../lib/remaining-duration";
+import {
+  confirmVersionedReplanPreview,
+  createReplanPreview,
+  normalizePlanVersion,
+  ReplanPreview,
+} from "../lib/replan-preview";
+import type { ReplanTask } from "../lib/replan";
 
-type PlanStep = {
-  id: string;
-  title: string;
-  detail: string;
-  estimatedMinutes: number;
-  scheduledDate: string;
-  feedback?: TaskFeedback;
-};
+type PlanStep = ReplanTask;
 
 type Plan = {
   id: string;
@@ -32,6 +31,7 @@ type Plan = {
   description: string;
   deadline: string;
   createdAt: string;
+  planVersion: number;
   source?: {
     type: "github";
     name: string;
@@ -105,7 +105,10 @@ function normalizeSavedPlan(value: string): Plan {
     completed?: boolean;
     feedback?: TaskFeedback;
   };
-  type LegacyPlan = Omit<Plan, "steps"> & { steps: LegacyStep[] };
+  type LegacyPlan = Omit<Plan, "steps" | "planVersion"> & {
+    planVersion?: unknown;
+    steps: LegacyStep[];
+  };
 
   const parsed = JSON.parse(value) as LegacyPlan;
   if (!parsed || !Array.isArray(parsed.steps)) {
@@ -114,6 +117,7 @@ function normalizeSavedPlan(value: string): Plan {
 
   return {
     ...parsed,
+    planVersion: normalizePlanVersion(parsed.planVersion),
     steps: parsed.steps.map(({ completed, feedback, ...step }) => {
       if (isValidFeedback(feedback)) return { ...step, feedback };
       if (completed) {
@@ -152,6 +156,8 @@ export default function Home() {
   const [feedbackDrafts, setFeedbackDrafts] = useState<
     Record<string, FeedbackDraft>
   >({});
+  const [pendingPreview, setPendingPreview] =
+    useState<ReplanPreview | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
   const [hasLoadedStorage, setHasLoadedStorage] = useState(false);
@@ -236,8 +242,9 @@ export default function Home() {
         throw new Error(result.error || "生成计划失败，请稍后再试。");
       }
 
-      setPlan(result.plan);
+      setPlan({ ...result.plan, planVersion: 1 });
       setFeedbackDrafts({});
+      setPendingPreview(null);
     } catch (requestError) {
       setError(
         requestError instanceof Error
@@ -273,16 +280,30 @@ export default function Home() {
 
   function submitFeedback(stepId: string) {
     const draft = feedbackDrafts[stepId];
-    if (!isValidFeedback(draft)) return;
+    if (!plan || !isValidFeedback(draft)) return;
 
-    setPlan((current) => {
-      if (!current) return current;
-      const nextSteps = submitTaskFeedback(current.steps, stepId, draft);
-      return nextSteps === current.steps
-        ? current
-        : { ...current, steps: nextSteps };
-    });
+    try {
+      setPendingPreview(
+        createReplanPreview(
+          plan.steps,
+          stepId,
+          draft,
+          today,
+          plan.deadline,
+          plan.planVersion,
+        ),
+      );
+      setError("");
+    } catch (previewError) {
+      setError(
+        previewError instanceof Error
+          ? previewError.message
+          : "生成调整预览失败。",
+      );
+    }
+  }
 
+  function clearFeedbackDraft(stepId: string) {
     setFeedbackDrafts((current) => {
       const next = { ...current };
       delete next[stepId];
@@ -290,10 +311,35 @@ export default function Home() {
     });
   }
 
+  function confirmPendingPreview() {
+    if (!plan || !pendingPreview) return;
+
+    try {
+      setPlan(confirmVersionedReplanPreview(plan, pendingPreview));
+      clearFeedbackDraft(pendingPreview.feedbackTaskId);
+      setPendingPreview(null);
+      setError("");
+    } catch (previewError) {
+      setError(
+        previewError instanceof Error
+          ? previewError.message
+          : "确认调整失败，请重新预览。",
+      );
+      setPendingPreview(null);
+    }
+  }
+
+  function cancelPendingPreview() {
+    if (!pendingPreview) return;
+    clearFeedbackDraft(pendingPreview.feedbackTaskId);
+    setPendingPreview(null);
+  }
+
   function resetPlan() {
     if (!window.confirm("清空当前计划并重新开始？")) return;
     setPlan(null);
     setFeedbackDrafts({});
+    setPendingPreview(null);
     setTitle("");
     setDescription("");
     setDeadline(defaultDeadline);
@@ -406,6 +452,7 @@ export default function Home() {
                   <h2>{plan.title}</h2>
                   <p className="deadline-copy">
                     截止于 {formatDate(plan.deadline)} · {plan.steps.length} 个步骤
+                    · 版本 {plan.planVersion}
                   </p>
                   {plan.source ? (
                     <a
@@ -423,6 +470,126 @@ export default function Home() {
                   清空
                 </button>
               </div>
+
+              {pendingPreview ? (
+                <div className="preview-backdrop">
+                  <section
+                    className="replan-preview"
+                    role="dialog"
+                    aria-modal="true"
+                    aria-labelledby="replan-preview-title"
+                  >
+                    <header className="preview-header">
+                      <div>
+                        <p>调整预览</p>
+                        <h2 id="replan-preview-title">本次调整</h2>
+                      </div>
+                      <span>原计划尚未修改</span>
+                    </header>
+
+                    <div className="preview-changes">
+                      {pendingPreview.changes.removed.length > 0 ? (
+                        <section className="preview-section">
+                          <h3>
+                            <span className="change-dot is-removed" />
+                            移除
+                          </h3>
+                          <p className="preview-section-note">
+                            从待办中移除，历史记录仍会保留
+                          </p>
+                          <ul>
+                            {pendingPreview.changes.removed.map((item) => (
+                              <li key={item.sourceTaskId}>
+                                <strong>{item.title}</strong>
+                                <span>{formatDate(item.date)} · 已完成</span>
+                              </li>
+                            ))}
+                          </ul>
+                        </section>
+                      ) : null}
+
+                      {pendingPreview.changes.shortened.length > 0 ? (
+                        <section className="preview-section">
+                          <h3>
+                            <span className="change-dot is-shortened" />
+                            缩短
+                          </h3>
+                          <ul>
+                            {pendingPreview.changes.shortened.map((item) => (
+                              <li key={item.sourceTaskId}>
+                                <strong>{item.title}</strong>
+                                <span>
+                                  {minutesLabel(item.originalDuration)} → 剩余{" "}
+                                  {remainingMinutesLabel(
+                                    item.remainingDuration,
+                                  )}
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
+                        </section>
+                      ) : null}
+
+                      {pendingPreview.changes.moved.length > 0 ? (
+                        <section className="preview-section">
+                          <h3>
+                            <span className="change-dot is-moved" />
+                            移动
+                          </h3>
+                          <ul>
+                            {pendingPreview.changes.moved.map((item) => (
+                              <li key={item.sourceTaskId}>
+                                <strong>{item.title}</strong>
+                                <span>
+                                  {formatDate(item.fromDate)} →{" "}
+                                  {formatDate(item.toDate)}
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
+                        </section>
+                      ) : null}
+
+                      {pendingPreview.changes.unchanged.length > 0 ? (
+                        <section className="preview-section">
+                          <h3>
+                            <span className="change-dot is-unchanged" />
+                            不变
+                          </h3>
+                          <ul>
+                            {pendingPreview.changes.unchanged.map((item) => (
+                              <li key={item.sourceTaskId}>
+                                <strong>{item.title}</strong>
+                                <span>{formatDate(item.date)}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        </section>
+                      ) : null}
+                    </div>
+
+                    <footer className="preview-actions">
+                      <p>取消后，原计划完全不变。</p>
+                      <div>
+                        <button
+                          className="preview-cancel"
+                          type="button"
+                          onClick={cancelPendingPreview}
+                        >
+                          取消
+                        </button>
+                        <button
+                          className="preview-confirm"
+                          type="button"
+                          onClick={confirmPendingPreview}
+                        >
+                          确认调整
+                        </button>
+                      </div>
+                    </footer>
+                  </section>
+                </div>
+              ) : null}
 
               <div className="progress-block">
                 <div className="progress-copy">
