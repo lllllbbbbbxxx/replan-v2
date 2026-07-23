@@ -16,29 +16,21 @@ import {
   calculateTotalRemainingMinutes,
 } from "../lib/remaining-duration";
 import {
-  confirmVersionedReplanPreview,
   createReplanPreview,
-  normalizePlanVersion,
   ReplanPreview,
 } from "../lib/replan-preview";
+import {
+  confirmPersistedReplan,
+  createPersistedPlan,
+  restorePersistedPlan,
+  undoLastReplan,
+  type GeneratedPlan,
+  type PersistedPlan,
+} from "../lib/plan-persistence";
 import type { ReplanTask } from "../lib/replan";
 
 type PlanStep = ReplanTask;
-
-type Plan = {
-  id: string;
-  title: string;
-  description: string;
-  deadline: string;
-  createdAt: string;
-  planVersion: number;
-  source?: {
-    type: "github";
-    name: string;
-    url: string;
-  };
-  steps: PlanStep[];
-};
+type Plan = PersistedPlan;
 
 type DayGroup = {
   date: string;
@@ -100,37 +92,6 @@ function buildDayGroups(plan: Plan): DayGroup[] {
     .map(([date, steps]) => ({ date, steps }));
 }
 
-function normalizeSavedPlan(value: string): Plan {
-  type LegacyStep = Omit<PlanStep, "feedback"> & {
-    completed?: boolean;
-    feedback?: TaskFeedback;
-  };
-  type LegacyPlan = Omit<Plan, "steps" | "planVersion"> & {
-    planVersion?: unknown;
-    steps: LegacyStep[];
-  };
-
-  const parsed = JSON.parse(value) as LegacyPlan;
-  if (!parsed || !Array.isArray(parsed.steps)) {
-    throw new Error("Invalid saved plan");
-  }
-
-  return {
-    ...parsed,
-    planVersion: normalizePlanVersion(parsed.planVersion),
-    steps: parsed.steps.map(({ completed, feedback, ...step }) => {
-      if (isValidFeedback(feedback)) return { ...step, feedback };
-      if (completed) {
-        return {
-          ...step,
-          feedback: { status: "completed", percent: 100 },
-        } satisfies PlanStep;
-      }
-      return step;
-    }),
-  };
-}
-
 function feedbackClass(feedback?: TaskFeedback) {
   if (!feedback) return "";
   return `is-${feedback.status.replace("_", "-")}`;
@@ -166,8 +127,12 @@ export default function Home() {
     const loadSavedPlan = window.setTimeout(() => {
       try {
         const saved = window.localStorage.getItem(STORAGE_KEY);
-        if (saved) setPlan(normalizeSavedPlan(saved));
-      } catch {
+        if (saved) setPlan(restorePersistedPlan(saved));
+      } catch (restoreError) {
+        console.warn(
+          "[replan] 丢弃无效的本地计划数据并重置",
+          restoreError,
+        );
         window.localStorage.removeItem(STORAGE_KEY);
       } finally {
         setHasLoadedStorage(true);
@@ -234,7 +199,7 @@ export default function Home() {
         }),
       });
       const result = (await response.json()) as {
-        plan?: Plan;
+        plan?: GeneratedPlan;
         error?: string;
       };
 
@@ -242,7 +207,7 @@ export default function Home() {
         throw new Error(result.error || "生成计划失败，请稍后再试。");
       }
 
-      setPlan({ ...result.plan, planVersion: 1 });
+      setPlan(createPersistedPlan(result.plan));
       setFeedbackDrafts({});
       setPendingPreview(null);
     } catch (requestError) {
@@ -315,7 +280,7 @@ export default function Home() {
     if (!plan || !pendingPreview) return;
 
     try {
-      setPlan(confirmVersionedReplanPreview(plan, pendingPreview));
+      setPlan(confirmPersistedReplan(plan, pendingPreview));
       clearFeedbackDraft(pendingPreview.feedbackTaskId);
       setPendingPreview(null);
       setError("");
@@ -333,6 +298,13 @@ export default function Home() {
     if (!pendingPreview) return;
     clearFeedbackDraft(pendingPreview.feedbackTaskId);
     setPendingPreview(null);
+  }
+
+  function undoLatestAdjustment() {
+    setPlan((current) => (current ? undoLastReplan(current) : current));
+    setFeedbackDrafts({});
+    setPendingPreview(null);
+    setError("");
   }
 
   function resetPlan() {
@@ -470,6 +442,21 @@ export default function Home() {
                   清空
                 </button>
               </div>
+
+              {plan.previousPlanSnapshot ? (
+                <div className="undo-banner" role="status">
+                  <span className="undo-banner-mark" aria-hidden="true">
+                    ✓
+                  </span>
+                  <div>
+                    <strong>计划已更新</strong>
+                    <p>已保存调整前的完整计划，可撤销最近一次调整。</p>
+                  </div>
+                  <button type="button" onClick={undoLatestAdjustment}>
+                    撤销
+                  </button>
+                </div>
+              ) : null}
 
               {pendingPreview ? (
                 <div className="preview-backdrop">
