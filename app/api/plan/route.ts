@@ -1,24 +1,23 @@
 import { NextResponse } from "next/server";
+import { requestDeepSeekCompletion } from "../../../lib/deepseek-client";
 import { getGitHubContext } from "../../../lib/github";
-import { isIsoDate, RawStep, scheduleSteps } from "../../../lib/planner";
+import {
+  cacheGeneratedSteps,
+  createD1PlanCache,
+  getCachedGeneratedSteps,
+  type PlanCacheDatabase,
+} from "../../../lib/plan-generation-cache";
+import {
+  createPlanCacheKey,
+  parseGeneratedSteps,
+} from "../../../lib/plan-generation";
+import { isIsoDate, scheduleSteps } from "../../../lib/planner";
 
 type PlanRequest = {
   title?: unknown;
   description?: unknown;
   deadline?: unknown;
   today?: unknown;
-};
-
-type DeepSeekResponse = {
-  choices?: Array<{
-    finish_reason?: string;
-    message?: {
-      content?: string | null;
-    };
-  }>;
-  error?: {
-    message?: string;
-  };
 };
 
 const taskPlanSchema = {
@@ -50,6 +49,15 @@ const taskPlanSchema = {
 
 function getRuntimeValue(key: "DEEPSEEK_API_KEY" | "DEEPSEEK_MODEL") {
   return process.env[key];
+}
+
+async function getPlanCacheDatabase() {
+  try {
+    const { env } = await import("cloudflare:workers");
+    return env.DB as PlanCacheDatabase | undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function friendlyApiError(status: number) {
@@ -115,24 +123,33 @@ export async function POST(request: Request) {
     );
   }
 
-  const userContext = [
+  const taskContext = [
     `任务：${title}`,
-    `截止日期：${deadline}`,
     description ? `补充说明：${description}` : "",
     githubContext?.promptContext ?? "",
   ]
     .filter(Boolean)
     .join("\n");
+  const userContext = `${taskContext}\n截止日期：${deadline}`;
 
-  let deepSeekResponse: Response;
-  try {
-    deepSeekResponse = await fetch("https://api.deepseek.com/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
+  const database = await getPlanCacheDatabase();
+  if (!database) {
+    return NextResponse.json(
+      { error: "计划缓存暂时不可用，请稍后重试。" },
+      { status: 503 },
+    );
+  }
+  const planCache = createD1PlanCache(database);
+  const cacheKey = await createPlanCacheKey({
+    model,
+    taskContext,
+  });
+  let generatedSteps = await getCachedGeneratedSteps(planCache, cacheKey);
+
+  if (!generatedSteps) {
+    const deepSeekResult = await requestDeepSeekCompletion({
+      apiKey,
+      payload: {
         model,
         messages: [
           {
@@ -142,6 +159,8 @@ export async function POST(request: Request) {
               "步骤必须具体、可执行、彼此不重复，并从准备工作推进到最终交付或检查。",
               "用简洁自然的中文输出。title 写动作，detail 写明确的完成标准。",
               "estimated_minutes 估计单次专注完成该步骤所需时间，必须是 15 到 240 之间的整数。",
+              "估时优先使用 15、30、45、60、90、120、180、240 分钟这些稳定档位，并根据可检查的实际工作量选择。",
+              "对相同输入保持步骤粒度、估时口径和步骤数量一致，不要随机增删评审、润色或总结步骤。",
               "如果用户要学习 GitHub 项目，并提供了仓库资料，必须基于 README 与目录生成针对该项目的学习步骤。",
               "每个学习步骤要明确写出真实的章节、模块、文件或实践主题，并在 detail 中给出可检查的学习产物，例如笔记、可运行代码或测试结果。",
               "禁止只给出“浏览 README”“了解项目结构”“学习核心功能”这类没有项目具体内容的泛化步骤。",
@@ -153,59 +172,63 @@ export async function POST(request: Request) {
         ],
         thinking: { type: "disabled" },
         response_format: { type: "json_object" },
-        temperature: 0.2,
-        max_tokens: 1800,
+        temperature: 0,
         stream: false,
-      }),
+      },
+      validateContent: (content) => {
+        try {
+          parseGeneratedSteps(content);
+          return true;
+        } catch {
+          return false;
+        }
+      },
     });
-  } catch {
-    return NextResponse.json(
-      { error: "无法连接 DeepSeek，请检查网络后重试。" },
-      { status: 502 },
-    );
-  }
 
-  let responseBody: DeepSeekResponse;
-  try {
-    responseBody = (await deepSeekResponse.json()) as DeepSeekResponse;
-  } catch {
-    return NextResponse.json(
-      { error: "DeepSeek 返回了无法读取的响应，请稍后重试。" },
-      { status: 502 },
-    );
-  }
+    if (!deepSeekResult.ok) {
+      if (deepSeekResult.kind === "api") {
+        console.error(
+          "DeepSeek API error",
+          deepSeekResult.status,
+          deepSeekResult.body?.error,
+        );
+        const status = deepSeekResult.status ?? 502;
+        return NextResponse.json(
+          { error: friendlyApiError(status) },
+          { status: status === 429 ? 429 : 502 },
+        );
+      }
 
-  if (!deepSeekResponse.ok) {
-    console.error(
-      "DeepSeek API error",
-      deepSeekResponse.status,
-      responseBody.error,
-    );
-    return NextResponse.json(
-      { error: friendlyApiError(deepSeekResponse.status) },
-      { status: deepSeekResponse.status === 429 ? 429 : 502 },
-    );
-  }
+      if (deepSeekResult.kind === "network") {
+        return NextResponse.json(
+          { error: "无法连接 DeepSeek，请检查网络后重试。" },
+          { status: 502 },
+        );
+      }
 
-  try {
-    const outputText = responseBody.choices?.[0]?.message?.content ?? "";
-    const parsed = JSON.parse(outputText) as {
-      steps?: RawStep[];
-    };
-    if (
-      !Array.isArray(parsed.steps) ||
-      parsed.steps.length < 3 ||
-      parsed.steps.some(
-        (step) =>
-          typeof step?.title !== "string" ||
-          typeof step?.detail !== "string" ||
-          typeof step?.estimated_minutes !== "number",
-      )
-    ) {
-      throw new Error("Invalid steps");
+      if (deepSeekResult.kind === "truncated") {
+        return NextResponse.json(
+          { error: "AI 返回内容过长，自动重试后仍未完整生成，请稍后重试。" },
+          { status: 502 },
+        );
+      }
+
+      return NextResponse.json(
+        { error: "DeepSeek 返回了无法读取的响应，请稍后重试。" },
+        { status: 502 },
+      );
     }
 
-    const steps = scheduleSteps(parsed.steps, today, deadline);
+    generatedSteps = parseGeneratedSteps(deepSeekResult.content);
+    generatedSteps = await cacheGeneratedSteps(
+      planCache,
+      cacheKey,
+      generatedSteps,
+    );
+  }
+
+  try {
+    const steps = scheduleSteps(generatedSteps, today, deadline);
     return NextResponse.json({
       plan: {
         id: crypto.randomUUID(),

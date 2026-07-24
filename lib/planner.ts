@@ -26,6 +26,41 @@ export function addDays(dateString: string, days: number) {
   return date.toISOString().slice(0, 10);
 }
 
+export function normalizeEstimatedMinutes(rawMinutes: number[]) {
+  const clampedMinutes = rawMinutes.map((minutes) =>
+    Number.isFinite(minutes) ? Math.max(15, Math.min(240, minutes)) : 15,
+  );
+  const roundedMinutes = clampedMinutes.map(
+    (minutes) => Math.floor(minutes / 5) * 5,
+  );
+  const targetTotal =
+    Math.round(
+      clampedMinutes.reduce((sum, minutes) => sum + minutes, 0) / 5,
+    ) * 5;
+  let minutesToDistribute =
+    targetTotal -
+    roundedMinutes.reduce((sum, minutes) => sum + minutes, 0);
+
+  const indicesByRemainder = clampedMinutes
+    .map((minutes, index) => ({
+      index,
+      remainder: minutes - roundedMinutes[index],
+    }))
+    .sort(
+      (left, right) =>
+        right.remainder - left.remainder || left.index - right.index,
+    );
+
+  for (const { index } of indicesByRemainder) {
+    if (minutesToDistribute < 5) break;
+    if (roundedMinutes[index] >= 240) continue;
+    roundedMinutes[index] += 5;
+    minutesToDistribute -= 5;
+  }
+
+  return roundedMinutes;
+}
+
 export function scheduleSteps(
   rawSteps: RawStep[],
   today: string,
@@ -44,13 +79,14 @@ export function scheduleSteps(
     dates.push(date);
   }
 
-  const steps = rawSteps.slice(0, 10).map((step) => ({
+  const sourceSteps = rawSteps.slice(0, 10);
+  const normalizedMinutes = normalizeEstimatedMinutes(
+    sourceSteps.map((step) => step.estimated_minutes),
+  );
+  const steps = sourceSteps.map((step, index) => ({
     title: step.title.trim().slice(0, 80),
     detail: step.detail.trim().slice(0, 180),
-    estimatedMinutes: Math.max(
-      15,
-      Math.min(240, Math.round(step.estimated_minutes / 5) * 5),
-    ),
+    estimatedMinutes: normalizedMinutes[index],
   }));
 
   const totalMinutes = steps.reduce(
